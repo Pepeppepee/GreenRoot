@@ -6,6 +6,8 @@ from PIL import Image
 import io
 import os
 from django.conf import settings
+from .crop_recommendation import recommend_crops
+
 
 
 # Load model ONCE (important for performance)
@@ -40,10 +42,13 @@ class SoilRecognitionAPIView(APIView):
             top_index = probs.top1
             confidence = float(probs.top1conf)
             label = model.names[top_index]
+            crops = recommend_crops(label)
+
 
             return Response({
                 "soil_type": label,
-                "confidence": round(confidence, 4)
+                "confidence": round(confidence, 4),
+                "recommended_crops": crops
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
