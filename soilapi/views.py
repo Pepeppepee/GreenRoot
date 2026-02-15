@@ -11,14 +11,17 @@ from .crop_recommendation import recommend_crops
 
 
 # Load model ONCE (important for performance)
-MODEL_PATH = os.path.join(settings.BASE_DIR, "models", "best.pt")
-model = YOLO(MODEL_PATH)
+SOIL_CHECK_MODEL = YOLO(
+    os.path.join(settings.BASE_DIR, "models", "soil_vs_nonsoil.pt")
+)
+
+SOIL_TYPE_MODEL = YOLO(
+    os.path.join(settings.BASE_DIR, "models", "soil_type.pt")
+)
+
 
 
 class SoilRecognitionAPIView(APIView):
-    """
-    POST image -> returns predicted soil type and confidence
-    """
 
     def post(self, request):
         image_file = request.FILES.get("image")
@@ -30,24 +33,42 @@ class SoilRecognitionAPIView(APIView):
             )
 
         try:
-            # Read image
-            image_bytes = image_file.read()
-            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            image = Image.open(image_file).convert("RGB")
 
-            # Run classification
-            results = model.predict(image, verbose=False)
+            # -------------------------
+            # STEP 1: Soil / Non-Soil
+            # -------------------------
+            soil_check = SOIL_CHECK_MODEL.predict(image, verbose=False)[0]
+            probs1 = soil_check.probs
 
-            # YOLOv8 classification output
-            probs = results[0].probs
-            top_index = probs.top1
-            confidence = float(probs.top1conf)
-            label = model.names[top_index]
-            crops = recommend_crops(label)
+            label1 = SOIL_CHECK_MODEL.names[probs1.top1]
+            conf1 = float(probs1.top1conf)
 
+            if label1 == "non_soil":
+                return Response({
+                    "soil_detected": False,
+                    "message": "Uploaded image is not soil",
+                    "confidence": round(conf1, 4)
+                }, status=status.HTTP_200_OK)
+
+            # -------------------------
+            # STEP 2: Soil Type
+            # -------------------------
+            soil_type_result = SOIL_TYPE_MODEL.predict(image, verbose=False)[0]
+            probs2 = soil_type_result.probs
+
+            soil_label = SOIL_TYPE_MODEL.names[probs2.top1]
+            soil_conf = float(probs2.top1conf)
+
+            # -------------------------
+            # STEP 3: Crop Recommendation
+            # -------------------------
+            crops = recommend_crops(soil_label)
 
             return Response({
-                "soil_type": label,
-                "confidence": round(confidence, 4),
+                "soil_detected": True,
+                "soil_type": soil_label,
+                "confidence": round(soil_conf, 4),
                 "recommended_crops": crops
             }, status=status.HTTP_200_OK)
 
